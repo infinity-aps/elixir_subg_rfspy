@@ -1,4 +1,9 @@
 defmodule SubgRfspy.UARTProxy do
+  @moduledoc """
+  UARTProxy is a module that can sit between the UART module and a caller and capture the traffic between the two for
+  later playback in tests. It is intended to be used as a drop in replacement for UART during configuration.
+  """
+
   use GenServer
   alias ExUnit.Assertions
   alias SubgRfspy.UART
@@ -57,7 +62,7 @@ defmodule SubgRfspy.UARTProxy do
     GenServer.call(__MODULE__, {:read, timeout_ms}, @genserver_timeout)
   end
 
-  def clear_buffers() do
+  def clear_buffers do
     GenServer.call(__MODULE__, {:clear_buffers}, @genserver_timeout)
   end
 
