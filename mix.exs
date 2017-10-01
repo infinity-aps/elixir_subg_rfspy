@@ -5,7 +5,7 @@ defmodule SubgRfspy.Mixfile do
     [
       app: :subg_rfspy,
       version: "0.9.0",
-      elixir: ">= 1.4.5",
+      elixir: "~> 1.5",
       start_permanent: Mix.env == :prod,
       deps: deps(),
       name: "SubgRfspy",
