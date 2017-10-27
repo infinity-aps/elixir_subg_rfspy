@@ -21,6 +21,7 @@ defmodule SubgRfspy.Mixfile do
 
   defp deps do
     [{:nerves_uart, "~> 0.1.1"},
+     {:elixir_ale, "~> 1.0.1"},
      {:csv, "~> 2.0.0"},
      {:credo, "~> 0.8", only: [:dev, :test], runtime: false},
      {:ex_doc, ">= 0.0.0", only: :dev}]

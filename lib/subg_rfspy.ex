@@ -65,7 +65,6 @@ defmodule SubgRfspy do
 
   def write(packet, repetitions, repetition_delay, timeout_ms) do
     write_batches(packet, repetitions, repetition_delay, timeout_ms)
-    read_response(timeout_ms)
   end
 
   def write_and_read(packet, timeout_ms \\ 500) do
@@ -73,7 +72,8 @@ defmodule SubgRfspy do
       @channel::8, timeout_ms::size(32), @retry_count::8,
       packet::binary>>
       |> write_command(:send_and_listen, timeout_ms + @serial_timeout_ms_padding)
-    timeout_ms |> read_response() |> process_response()
+    padded_timeout = timeout_ms + @serial_timeout_ms_padding
+    padded_timeout |> read_response() |> process_response()
   end
 
   def reset do
@@ -98,13 +98,23 @@ defmodule SubgRfspy do
   end
 
   @max_repetition_batch_size 250
-  defp write_batches(packet, repetitions, repetition_delay, timeout_ms)  do
+  defp write_batches(packet, repetitions, repetition_delay, timeout_ms) do
+    case repetitions do
+      x when x > @max_repetition_batch_size ->
+        write_batch(packet, repetitions - @max_repetition_batch_size, repetition_delay, timeout_ms)
+        read_response(timeout_ms)
+
+        write_batches(packet, repetitions - @max_repetition_batch_size, repetition_delay, timeout_ms)
+      _ ->
+        write_batch(packet, repetitions, repetition_delay, timeout_ms)
+    end
+  end
+
+  defp write_batch(packet, repetitions, repetition_delay, timeout_ms) do
     <<@channel::8, repetitions::8, repetition_delay::8, packet::binary>>
     |> write_command(:send_packet, timeout_ms)
 
-    if repetitions > @max_repetition_batch_size do
-      write_batches(packet, repetitions - @max_repetition_batch_size, repetition_delay, timeout_ms)
-    end
+    read_response(timeout_ms)
   end
 
   defp write_command(param, command_type, timeout_ms) do
@@ -130,9 +140,10 @@ defmodule SubgRfspy do
     end
   end
 
+  defp process_response({:error, :timeout}),              do: {:error, :timeout}
+  defp process_response({:ok, <<@timeout>>}),             do: {:error, :timeout}
   defp process_response({:ok, <<>>}),                     do: {:error, :empty}
   defp process_response({:ok, <<@command_interrupted>>}), do: {:error, :command_interrupted}
-  defp process_response({:ok, <<@timeout>>}),             do: {:error, :timeout}
   defp process_response({:ok, <<@zero_data>>}),           do: {:error, :zero_data}
   defp process_response({:ok, <<raw_rssi::8, sequence::8, data::binary>>}) do
     {:ok, %{rssi: rssi(raw_rssi), sequence: sequence, data: data}}
