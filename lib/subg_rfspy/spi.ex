@@ -14,10 +14,14 @@ defmodule SubgRfspy.SPI do
     GenServer.start_link(__MODULE__, [device, reset_pin], name: __MODULE__)
   end
 
+  @status_tx1 <<@initial_byte::8, 0x010100::24>>
+  @status_tx2 <<@initial_byte::8, 0x00000000::32>>
   def init([device, reset_pin]) do
     with {:ok, serial_pid} <- SPI.start_link(device, [speed_hz: 62500]),
          {:ok, reset_pid} <- GPIO.start_link(reset_pin, :output),
-         :ok <- _reset(reset_pid) do
+         :ok <- _reset(reset_pid),
+         transfer(serial_pid, @status_tx1),
+         <<_::16>> <> "OK" <> <<_::8>> <- transfer(serial_pid, @status_tx2) do
       {:ok, %{serial_pid: serial_pid, reset_pid: reset_pid, read_queue: []}}
     else
       error ->
