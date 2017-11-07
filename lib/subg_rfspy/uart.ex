@@ -13,13 +13,16 @@ defmodule SubgRfspy.UART do
     GenServer.start_link(__MODULE__, device, name: __MODULE__)
   end
 
+  @reset 0x07
   def init(device) do
     with {:ok, serial_pid} <- UART.start_link,
          :ok <- UART.open(serial_pid, device, speed: 19_200, active: false),
          :ok <- UART.configure(serial_pid, framing: {UARTFraming, separator: <<0x00>>}),
          :ok <- UART.flush(serial_pid),
+         :ok <- write_fully(<<@reset>>, 100, serial_pid),
+         :timer.sleep(5000),
          :ok <- write_fully(<<0x01>>, 100, serial_pid),
-         {:ok, "OK"} <- UART.read(serial_pid, 1_000) do
+         {:ok, "OK"} <- UART.read(serial_pid, 2_000) do
 
       {:ok, serial_pid}
     else
