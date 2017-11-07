@@ -8,7 +8,6 @@ defmodule SubgRfspy do
   require Logger
   use Bitwise
 
-  @serial_driver Application.get_env(:subg_rfspy, :serial_driver)
   @serial_timeout_ms_padding 1000
 
   @channel 0
@@ -43,7 +42,7 @@ defmodule SubgRfspy do
   }
 
   def update_register(register, value) do
-    @serial_driver.clear_buffers()
+    serial_driver().clear_buffers()
     write_command(<<register::8, value::8>>, :update_register, 100)
 
     true = read_until(<<1>>, 5)
@@ -81,7 +80,7 @@ defmodule SubgRfspy do
   end
 
   def sync do
-    @serial_driver.clear_buffers()
+    serial_driver().clear_buffers()
     {:ok, status} = get_state()
     {:ok, version} = get_version()
     %{status: status, version: version}
@@ -119,7 +118,7 @@ defmodule SubgRfspy do
 
   defp write_command(param, command_type, timeout_ms) do
     command = @commands[command_type]
-    response = @serial_driver.write(<<command::8>> <> param, timeout_ms + 10_000)
+    response = serial_driver().write(<<command::8>> <> param, timeout_ms + 10_000)
     if command_type == :reset do
       :timer.sleep(5000)
     end
@@ -130,7 +129,7 @@ defmodule SubgRfspy do
   @command_interrupted 0xBB
   @zero_data           0xCC
   defp read_response(timeout_ms) do
-    response = @serial_driver.read(timeout_ms)
+    response = serial_driver().read(timeout_ms)
     case response do
       {:ok, <<@command_interrupted>>} ->
         Logger.debug fn -> "Command Interrupted, continuing to read" end
@@ -159,5 +158,9 @@ defmodule SubgRfspy do
       {:ok, ^expected} -> true
       _                -> read_until(expected, retries - 1)
     end
+  end
+
+  defp serial_driver do
+    Application.get_env(:subg_rfspy, :serial_driver)
   end
 end
