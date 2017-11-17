@@ -41,84 +41,84 @@ defmodule SubgRfspy do
     frend0:   0x1B
   }
 
-  def update_register(register, value) do
-    serial_driver().clear_buffers()
-    write_command(<<register::8, value::8>>, :update_register, 100)
+  def update_register(%{name: name}, register, value) do
+    GenServer.call(name, {:clear_buffers})
+    write_command(name, <<register::8, value::8>>, :update_register, 100)
 
-    true = read_until(<<1>>, 5)
+    true = read_until(name, <<1>>, 5)
   end
 
-  def set_base_frequency(mhz) do
+  def set_base_frequency(chip, mhz) do
     freq_xtal = 24_000_000
     val = round((mhz * 1_000_000) / (freq_xtal / :math.pow(2, 16)))
-    update_register(@registers[:freq0], val &&& 0xff)
-    update_register(@registers[:freq1], (val >>> 8) &&& 0xff)
-    update_register(@registers[:freq2], (val >>> 16) &&& 0xff)
+    update_register(chip, @registers[:freq0], val &&& 0xff)
+    update_register(chip, @registers[:freq1], (val >>> 8) &&& 0xff)
+    update_register(chip, @registers[:freq2], (val >>> 16) &&& 0xff)
     {:ok}
   end
 
-  def read(timeout_ms \\ 1000) do
-    write_command(<<@channel::8, timeout_ms::32>>, :get_packet, timeout_ms + 1000)
-    timeout_ms |> read_response() |> process_response()
+  def read(%{name: name}, timeout_ms \\ 1000) do
+    write_command(name, <<@channel::8, timeout_ms::32>>, :get_packet, timeout_ms + 1000)
+    name |> read_response(timeout_ms) |> process_response()
   end
 
-  def write(packet, repetitions, repetition_delay, timeout_ms) do
-    write_batches(packet, repetitions, repetition_delay, timeout_ms)
+  def write(%{name: name}, packet, repetitions, repetition_delay, timeout_ms) do
+    write_batches(name, packet, repetitions, repetition_delay, timeout_ms)
   end
 
-  def write_and_read(packet, timeout_ms \\ 500) do
-    <<@channel::8, @repetitions::8, @repetition_delay::8,
+  def write_and_read(%{name: name}, packet, timeout_ms \\ 500) do
+    command = <<@channel::8, @repetitions::8, @repetition_delay::8,
       @channel::8, timeout_ms::size(32), @retry_count::8,
       packet::binary>>
-      |> write_command(:send_and_listen, timeout_ms + @serial_timeout_ms_padding)
+    write_command(name, command, :send_and_listen, timeout_ms + @serial_timeout_ms_padding)
     padded_timeout = timeout_ms + @serial_timeout_ms_padding
-    padded_timeout |> read_response() |> process_response()
+    name |> read_response(padded_timeout) |> process_response()
   end
 
-  def reset do
-    :ok = write_command(<<>>, :reset, 100)
+  def reset(%{name: name}) do
+    :ok = write_command(name, <<>>, :reset, 100)
   end
 
-  def sync do
-    serial_driver().clear_buffers()
-    {:ok, status} = get_state()
-    {:ok, version} = get_version()
+  def sync(name) do
+    GenServer.call(name, {:clear_buffers})
+    {:ok, status} = get_state(name)
+    {:ok, version} = get_version(name)
     %{status: status, version: version}
   end
 
-  def get_version do
-    :ok = write_command(<<>>, :get_version, 100)
-    read_response(5000)
+  def get_version(%{name: name}) do
+    :ok = write_command(name, <<>>, :get_version, 100)
+    read_response(name, 5000)
   end
 
-  def get_state do
-    :ok = write_command(<<>>, :get_state, 100)
-    read_response(5000)
+  def get_state(%{name: name}) do
+    :ok = write_command(name, <<>>, :get_state, 100)
+    read_response(name, 5000)
   end
 
   @max_repetition_batch_size 250
-  defp write_batches(packet, repetitions, repetition_delay, timeout_ms) do
+  defp write_batches(name, packet, repetitions, repetition_delay, timeout_ms) do
     case repetitions do
       x when x > @max_repetition_batch_size ->
-        write_batch(packet, repetitions - @max_repetition_batch_size, repetition_delay, timeout_ms)
-        read_response(timeout_ms)
+        write_batch(name, packet, repetitions - @max_repetition_batch_size, repetition_delay, timeout_ms)
+        read_response(name, timeout_ms)
 
-        write_batches(packet, repetitions - @max_repetition_batch_size, repetition_delay, timeout_ms)
+        write_batches(name, packet, repetitions - @max_repetition_batch_size, repetition_delay, timeout_ms)
       _ ->
-        write_batch(packet, repetitions, repetition_delay, timeout_ms)
+        write_batch(name, packet, repetitions, repetition_delay, timeout_ms)
     end
   end
 
-  defp write_batch(packet, repetitions, repetition_delay, timeout_ms) do
-    <<@channel::8, repetitions::8, repetition_delay::8, packet::binary>>
-    |> write_command(:send_packet, timeout_ms)
+  defp write_batch(name, packet, repetitions, repetition_delay, timeout_ms) do
+    command = <<@channel::8, repetitions::8, repetition_delay::8, packet::binary>>
+    write_command(name, command, :send_packet, timeout_ms)
 
-    read_response(timeout_ms)
+    read_response(name, timeout_ms)
   end
 
-  defp write_command(param, command_type, timeout_ms) do
+  defp write_command(name, param, command_type, timeout_ms) do
     command = @commands[command_type]
-    response = serial_driver().write(<<command::8>> <> param, timeout_ms + 10_000)
+    response = GenServer.call(name, {:write, <<command::8>> <> param, timeout_ms + 10_000}, genserver_timeout(timeout_ms + 10_000))
     if command_type == :reset do
       :timer.sleep(5000)
     end
@@ -128,12 +128,12 @@ defmodule SubgRfspy do
   @timeout             0xAA
   @command_interrupted 0xBB
   @zero_data           0xCC
-  defp read_response(timeout_ms) do
-    response = serial_driver().read(timeout_ms)
+  defp read_response(name, timeout_ms) do
+    response = GenServer.call(name, {:read, timeout_ms}, genserver_timeout(timeout_ms))
     case response do
       {:ok, <<@command_interrupted>>} ->
         Logger.debug fn -> "Command Interrupted, continuing to read" end
-        read_response(timeout_ms)
+        read_response(name, timeout_ms)
       _ ->
         response
     end
@@ -152,15 +152,13 @@ defmodule SubgRfspy do
   defp rssi(raw_rssi) when raw_rssi >= 128, do: rssi(raw_rssi - 256)
   defp rssi(raw_rssi), do: (raw_rssi / 2) - @rssi_offset
 
-  defp read_until(_, 0), do: false
-  defp read_until(expected, retries) do
-    case read_response(100) do
+  defp read_until(name, _, 0), do: false
+  defp read_until(name, expected, retries) do
+    case read_response(name, 100) do
       {:ok, ^expected} -> true
-      _                -> read_until(expected, retries - 1)
+      _                -> read_until(name, expected, retries - 1)
     end
   end
 
-  defp serial_driver do
-    Application.get_env(:subg_rfspy, :serial_driver)
-  end
+  defp genserver_timeout(timeout_ms), do: timeout_ms + 10_000
 end

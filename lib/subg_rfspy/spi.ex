@@ -4,14 +4,16 @@ defmodule SubgRfspy.SPI do
   subg_rfspy firmware (https://github.com/ps2/subg_rfspy) over SPI.
   """
 
+  defstruct name: nil, device: nil, reset_pin: nil
+
   require Logger
   use GenServer
   alias ElixirALE.{GPIO, SPI}
 
   @initial_byte 0x99
 
-  def start_link(device, reset_pin) do
-    GenServer.start_link(__MODULE__, [device, reset_pin], name: __MODULE__)
+  def start_link(%SubgRfspy.SPI{name: name, device: device, reset_pin: reset_pin}) do
+    GenServer.start_link(__MODULE__, [device, reset_pin], name: name)
   end
 
   @status_tx1 <<@initial_byte::8, 0x010100::24>>
@@ -30,18 +32,23 @@ defmodule SubgRfspy.SPI do
     end
   end
 
-  def clear_buffers, do: :ok
+  def chip_present?(%SubgRfspy.SPI{device: device, reset_pin: reset_pin}) do
+    with {:ok, serial_pid} <- SPI.start_link(device, [speed_hz: 62500]),
+         {:ok, reset_pid} <- GPIO.start_link(reset_pin, :output),
+         :ok <- _reset(reset_pid),
+         transfer(serial_pid, @status_tx1),
+         <<_::16>> <> "OK" <> <<_::8>> <- transfer(serial_pid, @status_tx2) do
 
-  def read(timeout_ms) do
-    GenServer.call(__MODULE__, {:read, timeout_ms}, genserver_timeout(timeout_ms))
+      SPI.release(serial_pid)
+      GPIO.release(reset_pid)
+      true
+    else
+      error -> false
+    end
   end
 
-  def write(data, timeout_ms) do
-    GenServer.call(__MODULE__, {:write, data, timeout_ms}, genserver_timeout(timeout_ms))
-  end
-
-  def reset do
-    GenServer.call(__MODULE__, {:reset})
+  def handle_call({:clear_buffers}, _from, state) do
+    {:reply, :ok, state}
   end
 
   def handle_call({:read, _timeout_ms}, _from, state = %{read_queue: [head | rest]}) do
@@ -120,9 +127,5 @@ defmodule SubgRfspy.SPI do
   defp _reverse_bits(<<first::binary-size(1), rest::binary>>, reversed) do
     <<a::1, b::1, c::1, d::1, e::1, f::1, g::1, h::1>> = first
     _reverse_bits(rest, <<reversed::binary, h::1, g::1, f::1, e::1, d::1, c::1, b::1, a::1>>)
-  end
-
-  defp genserver_timeout(timeout_ms) do
-    timeout_ms + 60_000
   end
 end
