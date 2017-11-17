@@ -118,7 +118,8 @@ defmodule SubgRfspy do
 
   defp write_command(name, param, command_type, timeout_ms) do
     command = @commands[command_type]
-    response = GenServer.call(name, {:write, <<command::8>> <> param, timeout_ms + 10_000}, genserver_timeout(timeout_ms + 10_000))
+    real_timeout = timeout_ms + 10_000
+    response = GenServer.call(name, {:write, <<command::8>> <> param, real_timeout}, genserver_timeout(real_timeout))
     if command_type == :reset do
       :timer.sleep(5000)
     end
