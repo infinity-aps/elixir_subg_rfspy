@@ -4,13 +4,15 @@ defmodule SubgRfspy.UART do
   subg_rfspy firmware (https://github.com/ps2/subg_rfspy) over a UART.
   """
 
+  defstruct name: nil, device: nil
+
   require Logger
   use GenServer
   alias SubgRfspy.UARTFraming
   alias Nerves.UART
 
-  def start_link(device) do
-    GenServer.start_link(__MODULE__, device, name: __MODULE__)
+  def start_link(%SubgRfspy.UART{name: name, device: device}) do
+    GenServer.start_link(__MODULE__, device, name: name)
   end
 
   @reset 0x07
@@ -18,11 +20,7 @@ defmodule SubgRfspy.UART do
     with {:ok, serial_pid} <- UART.start_link,
          :ok <- UART.open(serial_pid, device, speed: 19_200, active: false),
          :ok <- UART.configure(serial_pid, framing: {UARTFraming, separator: <<0x00>>}),
-         :ok <- UART.flush(serial_pid),
-         :ok <- write_fully(<<@reset>>, 100, serial_pid),
-         :timer.sleep(5000),
-         :ok <- write_fully(<<0x01>>, 100, serial_pid),
-         {:ok, "OK"} <- UART.read(serial_pid, 2_000) do
+         :ok <- UART.flush(serial_pid) do
 
       {:ok, serial_pid}
     else
@@ -32,21 +30,26 @@ defmodule SubgRfspy.UART do
     end
   end
 
+  def chip_present?(%SubgRfspy.UART{device: device}) do
+    with {:ok, serial_pid} <- UART.start_link,
+         :ok <- UART.open(serial_pid, device, speed: 19_200, active: false),
+         :ok <- UART.configure(serial_pid, framing: {UARTFraming, separator: <<0x00>>}),
+         :ok <- UART.flush(serial_pid),
+         :ok <- write_fully(<<@reset>>, 100, serial_pid),
+         :timer.sleep(2000),
+         :ok <- write_fully(<<0x01>>, 100, serial_pid),
+         {:ok, "OK"} <- UART.read(serial_pid, 2_000) do
+
+      UART.stop(serial_pid)
+      true
+    else
+      _error -> false
+    end
+  end
+
   def terminate(reason, serial_pid) do
     Logger.warn fn -> "Exiting, reason: #{inspect reason}" end
     UART.close(serial_pid)
-  end
-
-  def write(data, timeout_ms) do
-    GenServer.call(__MODULE__, {:write, data, timeout_ms}, genserver_timeout(timeout_ms))
-  end
-
-  def read(timeout_ms) do
-    GenServer.call(__MODULE__, {:read, timeout_ms}, genserver_timeout(timeout_ms))
-  end
-
-  def clear_buffers do
-    GenServer.call(__MODULE__, {:clear_buffers})
   end
 
   def handle_call({:write, data, timeout_ms}, _from, serial_pid) do
@@ -70,9 +73,5 @@ defmodule SubgRfspy.UART do
       :ok -> UART.drain(serial_pid)
       err -> err
     end
-  end
-
-  defp genserver_timeout(timeout_ms) do
-    timeout_ms + 2_000
   end
 end
