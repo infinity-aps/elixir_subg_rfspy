@@ -43,7 +43,7 @@ defmodule SubgRfspy.SPI do
       GPIO.release(reset_pid)
       true
     else
-      error -> false
+      _error -> false
     end
   end
 

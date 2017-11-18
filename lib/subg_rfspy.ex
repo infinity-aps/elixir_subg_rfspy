@@ -153,7 +153,7 @@ defmodule SubgRfspy do
   defp rssi(raw_rssi) when raw_rssi >= 128, do: rssi(raw_rssi - 256)
   defp rssi(raw_rssi), do: (raw_rssi / 2) - @rssi_offset
 
-  defp read_until(name, _, 0), do: false
+  defp read_until(_, _, 0), do: false
   defp read_until(name, expected, retries) do
     case read_response(name, 100) do
       {:ok, ^expected} -> true
